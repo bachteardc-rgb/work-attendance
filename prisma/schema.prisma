@@ -1,0 +1,132 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// NextAuth.js Models
+model Account {
+  id                 String  @id @default(cuid())
+  userId             String
+  type               String
+  provider           String
+  providerAccountId  String
+  refresh_token      String?  
+  access_token       String?  
+  expires_at         Int?
+  token_type         String?
+  scope              String?
+  id_token           String?  
+  session_state      String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime?
+  image         String?
+
+  // 근태관리 앱 고유 필드 (Employees)
+  department       String?
+  baseSchedule     String    @default("09:00-18:00")
+  annualLeaveTotal Float     @default(15.0)
+  annualLeaveUsed  Float     @default(0.0)
+  role             String    @default("USER") // USER, ADMIN
+
+  accounts            Account[]
+  sessions            Session[]
+  leaveRequests       LeaveRequest[]
+  overtimeRequests    OvertimeRequest[]
+  scheduleAdjustments ScheduleAdjustment[]
+  leaveQuotas         LeaveQuota[]
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// 비즈니스 로직 Models
+
+model LeaveType {
+  id          String   @id @default(cuid())
+  code        String   @unique // ANNUAL, SICK, OFFICIAL, FAMILY_CARE, COMPENSATORY 등
+  name        String   // 연차, 병가, 공가, 가족돌봄휴가, 대체휴가 등
+  isPaid      Boolean  @default(true)
+  description String?
+  createdAt   DateTime @default(now())
+}
+
+model LeaveQuota {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  year      Int      // 예: 2026
+  leaveType String   // ANNUAL, SICK, OFFICIAL, FAMILY_CARE, COMPENSATORY 등
+  totalDays Float    // 총 부여 일수
+  usedDays  Float    @default(0.0) // 사용 일수
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, year, leaveType])
+}
+
+model LeaveRequest {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String   // ANNUAL, HALF_AM, HALF_PM, SICK, OFFICIAL, FAMILY_CARE, COMPENSATORY 등
+  startDate DateTime
+  endDate   DateTime
+  daysUsed  Float
+  reason    String?
+  status    String   @default("PENDING") // PENDING, APPROVED, REJECTED
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model OvertimeRequest {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date        DateTime
+  startTime   String   // 예: "18:00"
+  endTime     String   // 예: "21:30"
+  totalHours  Float    // 예: 3.5
+  description String?
+  status      String   @default("PENDING") // PENDING, APPROVED, REJECTED
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model ScheduleAdjustment {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  applyDate     DateTime
+  originalTime  String   // 예: "09:00-18:00"
+  requestedTime String   // 예: "10:00-19:00"
+  reason        String?
+  status        String   @default("PENDING") // PENDING, APPROVED, REJECTED
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
