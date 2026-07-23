@@ -82,7 +82,7 @@ export default async function DashboardPage() {
     });
 
     // 각 유저별로 데이터를 맵핑
-    allUsersData = allUsers.map(u => {
+    allUsersData = allUsers.map((u: any) => {
       const userQs = allQuotas.filter((q: any) => q.userId === u.id);
       
       const userOvertimes = allOvertimes.filter((ot: any) => ot.userId === u.id);
