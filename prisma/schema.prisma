@@ -130,3 +130,5 @@ model ScheduleAdjustment {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 }
+
+// Force prisma generate on Vercel by modifying schema
