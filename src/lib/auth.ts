@@ -3,6 +3,12 @@ import GoogleProvider from "next-auth/providers/google";
 import CredentialsProvider from "next-auth/providers/credentials";
 import { prisma } from "./prisma";
 
+// 구글 자격증명이 설정된 경우에만 구글 로그인을 활성화한다.
+// (데모 환경처럼 미설정 상태에서 동작하지 않는 버튼이 노출되는 것을 막는다)
+const googleEnabled = Boolean(
+  process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET
+);
+
 export const authOptions: NextAuthOptions = {
   providers: [
     CredentialsProvider({
@@ -47,10 +53,14 @@ export const authOptions: NextAuthOptions = {
         };
       },
     }),
-    GoogleProvider({
-      clientId: process.env.GOOGLE_CLIENT_ID || "",
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET || "",
-    }),
+    ...(googleEnabled
+      ? [
+          GoogleProvider({
+            clientId: process.env.GOOGLE_CLIENT_ID as string,
+            clientSecret: process.env.GOOGLE_CLIENT_SECRET as string,
+          }),
+        ]
+      : []),
   ],
   session: {
     strategy: "jwt",

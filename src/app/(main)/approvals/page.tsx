@@ -31,6 +31,33 @@ export default async function ApprovalsPage() {
     orderBy: { createdAt: "asc" }
   });
 
+  const pendingEducations = await prisma.educationRequest.findMany({
+    where: { status: "PENDING" },
+    include: { user: { select: { name: true, department: true } } },
+    orderBy: { createdAt: "asc" }
+  });
+
+  const pendingTrips = await prisma.businessTripRequest.findMany({
+    where: { status: "PENDING" },
+    include: { user: { select: { name: true, department: true } } },
+    orderBy: { createdAt: "asc" }
+  });
+
+  // 제출된 교육/출장 결과 보고 (관리자 열람용)
+  const submittedEduResults = await prisma.educationRequest.findMany({
+    where: { resultSubmittedAt: { not: null } },
+    include: { user: { select: { name: true, department: true } } },
+    orderBy: { resultSubmittedAt: "desc" },
+    take: 50
+  });
+
+  const submittedTripResults = await prisma.businessTripRequest.findMany({
+    where: { resultSubmittedAt: { not: null } },
+    include: { user: { select: { name: true, department: true } } },
+    orderBy: { resultSubmittedAt: "desc" },
+    take: 50
+  });
+
   // 전체 직원 목록 및 휴가 종류 조회
   const users = await prisma.user.findMany({
     select: { id: true, name: true, email: true, department: true, role: true }
@@ -49,6 +76,10 @@ export default async function ApprovalsPage() {
         leaves={pendingLeaves} 
         overtimes={pendingOvertimes} 
         adjustments={pendingAdjustments}
+        educations={pendingEducations}
+        trips={pendingTrips}
+        eduResults={submittedEduResults}
+        tripResults={submittedTripResults}
         users={users}
         leaveTypes={leaveTypes}
       />

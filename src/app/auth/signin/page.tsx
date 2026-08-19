@@ -1,8 +1,10 @@
 "use client";
 
-import { signIn } from "next-auth/react";
+import { signIn, getProviders } from "next-auth/react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { Suspense, useState } from "react";
+import { Suspense, useState, useEffect } from "react";
+
+const IS_DEMO = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
 
 function SignInContent() {
   const searchParams = useSearchParams();
@@ -13,6 +15,18 @@ function SignInContent() {
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+
+  // 실제로 활성화된 로그인 수단만 노출한다.
+  const [googleEnabled, setGoogleEnabled] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    getProviders().then((p) => {
+      if (!cancelled) setGoogleEnabled(Boolean(p && p.google));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleTestLogin = async (targetEmail: string) => {
     setLoading(true);
@@ -72,6 +86,22 @@ function SignInContent() {
           <p style={{ margin: 0, fontSize: "14px", color: "#6b7280" }}>
             원하시는 로그인 방식을 선택해 주세요.
           </p>
+          {IS_DEMO && (
+            <div style={{
+              marginTop: "14px",
+              padding: "10px 12px",
+              backgroundColor: "#fffbeb",
+              border: "1px solid #fde68a",
+              borderRadius: "8px",
+              fontSize: "12.5px",
+              color: "#92400e",
+              lineHeight: 1.5,
+              textAlign: "left"
+            }}>
+              <strong>데모 환경입니다.</strong> 아래 버튼으로 비밀번호 없이 로그인해
+              기능을 둘러보실 수 있습니다. 표시되는 자료는 모두 예시이며 실제 근태 기록이 아닙니다.
+            </div>
+          )}
         </div>
 
         {(error || errorMessage) && (
@@ -184,13 +214,16 @@ function SignInContent() {
           </div>
         </form>
 
+        {googleEnabled && (
         <div style={{ display: "flex", alignItems: "center", margin: "20px 0" }}>
           <div style={{ flex: 1, height: "1px", backgroundColor: "#e5e7eb" }}></div>
           <span style={{ padding: "0 10px", fontSize: "12px", color: "#9ca3af" }}>또는</span>
           <div style={{ flex: 1, height: "1px", backgroundColor: "#e5e7eb" }}></div>
         </div>
+        )}
 
-        {/* 기존 Google 로그인 */}
+        {/* 기존 Google 로그인 (자격증명이 설정된 경우에만 노출) */}
+        {googleEnabled && (
         <button
           type="button"
           onClick={() => signIn("google", { callbackUrl })}
@@ -221,6 +254,7 @@ function SignInContent() {
           </svg>
           Google 계정으로 로그인
         </button>
+        )}
       </div>
     </div>
   );

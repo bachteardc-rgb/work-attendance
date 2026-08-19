@@ -5,6 +5,13 @@ import { prisma } from "@/lib/prisma";
 
 export async function GET() {
   try {
+    const session = await getServerSession(authOptions);
+    const role = (session?.user as any)?.role;
+
+    if (!session || role !== "ADMIN") {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+    }
+
     const leaveTypes = await prisma.leaveType.findMany({
       orderBy: { createdAt: "asc" },
     });

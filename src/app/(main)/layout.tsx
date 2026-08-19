@@ -4,6 +4,8 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import LogoutButton from "@/components/LogoutButton";
 
+const IS_DEMO = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
+
 export default async function MainLayout({
   children,
 }: {
@@ -11,7 +13,10 @@ export default async function MainLayout({
 }) {
   const session = await getServerSession(authOptions);
 
-  if (!session) {
+  // session.user can exist without an `id` if the DB row behind the JWT
+  // was deleted after the token was issued (see session() callback in
+  // src/lib/auth.ts) — treat that the same as no session.
+  if (!session || !(session.user as any)?.id) {
     redirect("/auth/signin");
   }
 
@@ -49,6 +54,26 @@ export default async function MainLayout({
 
       {/* Main Content */}
       <main style={{ flex: 1, padding: "30px", overflowY: "auto" }}>
+        {IS_DEMO && (
+          <div style={{
+            marginBottom: "20px",
+            padding: "11px 16px",
+            backgroundColor: "#fffbeb",
+            border: "1px solid #fde68a",
+            borderRadius: "8px",
+            fontSize: "13px",
+            color: "#92400e",
+            display: "flex",
+            flexWrap: "wrap",
+            gap: "6px",
+            alignItems: "center"
+          }}>
+            <strong>데모 환경</strong>
+            <span style={{ color: "#b45309" }}>
+              — 표시되는 자료는 모두 예시이며 실제 근태 기록이 아닙니다. 입력한 내용은 언제든 초기화될 수 있습니다.
+            </span>
+          </div>
+        )}
         {children}
       </main>
     </div>

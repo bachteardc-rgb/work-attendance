@@ -1,11 +1,15 @@
 "use client";
 
 import { useState } from "react";
+import CalendarView from "./CalendarView";
+
+type TabKey = "MY_STATUS" | "CALENDAR" | "ALL_USERS_STATUS" | "ALL_SCHEDULES";
 
 export default function DashboardClient({
   user,
   currentYear,
   currentMonthOvertime,
+  overtimeMonthlyLimit,
   userQuotas,
   leaveTypes,
   recentLeaves,
@@ -16,6 +20,7 @@ export default function DashboardClient({
   user: any;
   currentYear: number;
   currentMonthOvertime: number;
+  overtimeMonthlyLimit: number;
   userQuotas: any[];
   leaveTypes: any[];
   recentLeaves: any[];
@@ -23,7 +28,21 @@ export default function DashboardClient({
   allUsersData: any[];
   allAdjustments: any[];
 }) {
-  const [activeTab, setActiveTab] = useState<"MY_STATUS" | "ALL_USERS_STATUS" | "ALL_SCHEDULES">("MY_STATUS");
+  const [activeTab, setActiveTab] = useState<TabKey>("MY_STATUS");
+
+  const isAdmin = user?.role === "ADMIN";
+
+  // 달력은 모든 사용자에게, 나머지 집계 탭은 관리자에게만 노출합니다.
+  const TABS: { key: TabKey; label: string }[] = [
+    { key: "MY_STATUS", label: "내 근태 현황" },
+    { key: "CALENDAR", label: "달력" },
+    ...(isAdmin
+      ? ([
+          { key: "ALL_USERS_STATUS", label: "전체 직원 근태 현황" },
+          { key: "ALL_SCHEDULES", label: "시간대별 근무 현황" },
+        ] as { key: TabKey; label: string }[])
+      : []),
+  ];
 
   // 유저별로 가장 최신의 승인된 근무시간 조정 내역을 추출
   const latestAdjustmentsMap = new Map<string, any>();
@@ -54,15 +73,16 @@ export default function DashboardClient({
     <div>
       <h1 style={{ fontSize: "24px", fontWeight: "700", color: "#111827", marginBottom: "20px" }}>대시보드</h1>
 
-      {/* 탭 네비게이션 (관리자일 때만 노출) */}
-      {user?.role === "ADMIN" && (
-        <div style={{ display: "flex", gap: "10px", marginBottom: "20px", borderBottom: "2px solid #e2e8f0", paddingBottom: "8px", overflowX: "auto" }}>
+      {/* 탭 네비게이션 */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginBottom: "20px", borderBottom: "2px solid #e2e8f0", paddingBottom: "8px" }}>
+        {TABS.map((tab) => (
           <button
-            onClick={() => setActiveTab("MY_STATUS")}
+            key={tab.key}
+            onClick={() => setActiveTab(tab.key)}
             style={{
               padding: "10px 18px",
-              backgroundColor: activeTab === "MY_STATUS" ? "#2563eb" : "#f1f5f9",
-              color: activeTab === "MY_STATUS" ? "#ffffff" : "#475569",
+              backgroundColor: activeTab === tab.key ? "#2563eb" : "#f1f5f9",
+              color: activeTab === tab.key ? "#ffffff" : "#475569",
               border: "none",
               borderRadius: "6px",
               fontWeight: "600",
@@ -70,40 +90,10 @@ export default function DashboardClient({
               whiteSpace: "nowrap"
             }}
           >
-            내 근태 현황
+            {tab.label}
           </button>
-          <button
-            onClick={() => setActiveTab("ALL_USERS_STATUS")}
-            style={{
-              padding: "10px 18px",
-              backgroundColor: activeTab === "ALL_USERS_STATUS" ? "#2563eb" : "#f1f5f9",
-              color: activeTab === "ALL_USERS_STATUS" ? "#ffffff" : "#475569",
-              border: "none",
-              borderRadius: "6px",
-              fontWeight: "600",
-              cursor: "pointer",
-              whiteSpace: "nowrap"
-            }}
-          >
-            전체 직원 근태 현황
-          </button>
-          <button
-            onClick={() => setActiveTab("ALL_SCHEDULES")}
-            style={{
-              padding: "10px 18px",
-              backgroundColor: activeTab === "ALL_SCHEDULES" ? "#2563eb" : "#f1f5f9",
-              color: activeTab === "ALL_SCHEDULES" ? "#ffffff" : "#475569",
-              border: "none",
-              borderRadius: "6px",
-              fontWeight: "600",
-              cursor: "pointer",
-              whiteSpace: "nowrap"
-            }}
-          >
-            시간대별 근무 현황
-          </button>
-        </div>
-      )}
+        ))}
+      </div>
 
       {/* 내 근태 현황 탭 */}
       {activeTab === "MY_STATUS" && (
@@ -146,13 +136,22 @@ export default function DashboardClient({
 
             {/* 이번 달 시간외근무 카드 */}
             <div style={{ padding: "18px", backgroundColor: "#ffffff", borderRadius: "10px", border: "1px solid #e2e8f0", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
-              <h3 style={{ margin: "0 0 8px 0", fontSize: "13px", color: "#64748b" }}>이번 달 승인된 시간외근무</h3>
+              <h3 style={{ margin: "0 0 8px 0", fontSize: "13px", color: "#64748b" }}>이번 달 시간외근무</h3>
               <div style={{ fontSize: "28px", fontWeight: "700", color: "#d97706" }}>
                 {currentMonthOvertime.toFixed(1)} <span style={{ fontSize: "15px", color: "#64748b", fontWeight: "normal" }}>시간</span>
               </div>
               <div style={{ marginTop: "8px", fontSize: "12px", color: "#94a3b8" }}>
-                당월 승인 기준 누적
+                {overtimeMonthlyLimit > 0
+                  ? `총 ${overtimeMonthlyLimit}시간 중 ${currentMonthOvertime.toFixed(1)}시간 사용`
+                  : "당월 승인 기준 누적 (부여시간 미설정)"}
               </div>
+              {overtimeMonthlyLimit > 0 && (
+                <div style={{ marginTop: "4px", fontSize: "12px", fontWeight: "700", color: currentMonthOvertime > overtimeMonthlyLimit ? "#dc2626" : "#16a34a" }}>
+                  {currentMonthOvertime > overtimeMonthlyLimit
+                    ? `이번 달 한도 ${(currentMonthOvertime - overtimeMonthlyLimit).toFixed(1)}시간 초과`
+                    : `잔여 ${(overtimeMonthlyLimit - currentMonthOvertime).toFixed(1)}시간`}
+                </div>
+              )}
             </div>
           </div>
 
@@ -255,6 +254,9 @@ export default function DashboardClient({
           </div>
         </>
       )}
+
+      {/* 달력 탭 */}
+      {activeTab === "CALENDAR" && <CalendarView isAdmin={isAdmin} />}
 
       {/* 전체 직원 근태 현황 탭 */}
       {activeTab === "ALL_USERS_STATUS" && user?.role === "ADMIN" && (

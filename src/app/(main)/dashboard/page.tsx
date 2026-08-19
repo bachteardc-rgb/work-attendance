@@ -1,4 +1,5 @@
 import { getServerSession } from "next-auth/next";
+import { redirect } from "next/navigation";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import DashboardClient from "./DashboardClient";
@@ -6,6 +7,15 @@ import DashboardClient from "./DashboardClient";
 export default async function DashboardPage() {
   const session = await getServerSession(authOptions);
   const user = session?.user as any;
+
+  // (main)/layout.tsx already redirects when there's no session, but
+  // session.user can still lack `id` if the DB user behind the JWT was
+  // deleted (see src/lib/auth.ts session() callback) — guard here too so
+  // that case fails safe instead of crashing on `user.id` below.
+  if (!user?.id) {
+    redirect("/auth/signin");
+  }
+
   const now = new Date();
   const currentYear = now.getFullYear();
 
@@ -24,15 +34,17 @@ export default async function DashboardPage() {
   });
   const currentMonthOvertime = overtimes._sum.totalHours || 0;
 
+  // 관리자가 부여한 시간외근무 '월 한도'. 휴가와 동일하게 이번 달 기준으로 표시합니다.
+  const overtimeQuota = await prisma.overtimeQuota.findUnique({
+    where: { userId_year: { userId: user.id, year: currentYear } },
+  });
+  const overtimeMonthlyLimit = overtimeQuota?.monthlyHours ?? 0;
+
   // 2. 본인의 올해 휴가 쿼터 (LeaveQuota) 조회
-  const userQuotas = (prisma as any).leaveQuota 
-    ? await (prisma as any).leaveQuota.findMany({ where: { userId: user.id, year: currentYear } })
-    : [];
+  const userQuotas = await prisma.leaveQuota.findMany({ where: { userId: user.id, year: currentYear } });
 
   // 3. 전체 휴가 종류 조회
-  const leaveTypes = (prisma as any).leaveType 
-    ? await (prisma as any).leaveType.findMany({ orderBy: { createdAt: "asc" } })
-    : [];
+  const leaveTypes = await prisma.leaveType.findMany({ orderBy: { createdAt: "asc" } });
 
   // 4. 최근 휴가 신청 내역 (본인) 5건 조회
   const recentLeaves = await prisma.leaveRequest.findMany({
@@ -105,6 +117,7 @@ export default async function DashboardPage() {
       user={user}
       currentYear={currentYear}
       currentMonthOvertime={currentMonthOvertime}
+      overtimeMonthlyLimit={overtimeMonthlyLimit}
       userQuotas={userQuotas}
       leaveTypes={leaveTypes}
       recentLeaves={recentLeaves}

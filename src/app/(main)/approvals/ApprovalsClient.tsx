@@ -6,16 +6,24 @@ export default function ApprovalsClient({
   leaves, 
   overtimes, 
   adjustments,
+  educations,
+  trips,
+  eduResults,
+  tripResults,
   users, 
   leaveTypes: initialLeaveTypes 
 }: { 
   leaves: any[]; 
   overtimes: any[]; 
   adjustments: any[];
+  educations: any[];
+  trips: any[];
+  eduResults: any[];
+  tripResults: any[];
   users: any[]; 
   leaveTypes: any[];
 }) {
-  const [activeTab, setActiveTab] = useState<"APPROVALS" | "QUOTAS" | "LEAVE_TYPES" | "USERS">("APPROVALS");
+  const [activeTab, setActiveTab] = useState<"APPROVALS" | "RESULTS" | "QUOTAS" | "OVERTIME_QUOTAS" | "LEAVE_TYPES" | "USERS">("APPROVALS");
   const [loading, setLoading] = useState<string | null>(null);
 
   // Users 폼 및 상태
@@ -27,10 +35,18 @@ export default function ApprovalsClient({
 
   // Quota 폼 및 상태
   const [selectedYear, setSelectedYear] = useState(2026);
-  const [quotaUserId, setQuotaUserId] = useState(users[0]?.id || "");
   const [quotaLeaveType, setQuotaLeaveType] = useState(initialLeaveTypes[0]?.code || "ANNUAL");
-  const [quotaTotalDays, setQuotaTotalDays] = useState("15");
   const [quotasData, setQuotasData] = useState<any[]>([]);
+  // 휴가 일괄 부여 입력값 { userId: "부여일수" }
+  const [quotaDrafts, setQuotaDrafts] = useState<Record<string, string>>({});
+  const [savingQuotas, setSavingQuotas] = useState(false);
+
+  // 시간외근무 일괄 부여
+  const [otYear, setOtYear] = useState(2026);
+  const [otRows, setOtRows] = useState<any[]>([]);
+  const [otDrafts, setOtDrafts] = useState<Record<string, string>>({});
+  const [otLoading, setOtLoading] = useState(true);
+  const [savingOt, setSavingOt] = useState(false);
 
   // LeaveType 폼 및 상태
   const [leaveTypes, setLeaveTypes] = useState<any[]>(initialLeaveTypes);
@@ -54,26 +70,125 @@ export default function ApprovalsClient({
   };
 
   // 쿼터 목록 가져오기
-  const fetchQuotas = async () => {
+  // isCancelled: 조회 도중 탭/연도가 바뀌면 뒤늦게 도착한 응답을 버립니다.
+  const fetchQuotas = async (isCancelled: () => boolean = () => false) => {
     try {
       const res = await fetch(`/api/admin/quotas?year=${selectedYear}`);
       if (res.ok) {
         const data = await res.json();
-        setQuotasData(data.users || []);
+        if (isCancelled()) return;
+        const list = data.users || [];
+        setQuotasData(list);
+        // 현재 선택된 휴가 종류의 기존 부여일수를 입력칸 기본값으로 채웁니다.
+        const drafts: Record<string, string> = {};
+        list.forEach((u: any) => {
+          const q = u.leaveQuotas?.find((x: any) => x.leaveType === quotaLeaveType);
+          drafts[u.id] = q ? String(q.totalDays) : "";
+        });
+        setQuotaDrafts(drafts);
       }
     } catch (e) {
       console.error(e);
     }
   };
 
-  useEffect(() => {
-    if (activeTab === "QUOTAS") {
-      fetchQuotas();
+  const fetchOvertimeQuotas = async (isCancelled: () => boolean = () => false) => {
+    try {
+      const res = await fetch(`/api/admin/overtime-quotas?year=${otYear}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (isCancelled()) return;
+        const list = data.users || [];
+        setOtRows(list);
+        const drafts: Record<string, string> = {};
+        list.forEach((u: any) => { drafts[u.id] = u.monthlyHours ? String(u.monthlyHours) : ""; });
+        setOtDrafts(drafts);
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      if (!isCancelled()) setOtLoading(false);
     }
-  }, [activeTab, selectedYear]);
+  };
+
+  // 휴가 부여 일괄 등록
+  const handleBulkSaveQuotas = async () => {
+    const items = quotasData
+      .filter((u) => (quotaDrafts[u.id] ?? "").trim() !== "")
+      .map((u) => ({ userId: u.id, totalDays: quotaDrafts[u.id] }));
+
+    if (items.length === 0) {
+      alert("부여할 일수를 한 명 이상 입력해 주세요.");
+      return;
+    }
+
+    setSavingQuotas(true);
+    try {
+      const res = await fetch("/api/admin/quotas", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ year: selectedYear, leaveType: quotaLeaveType, items }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "저장 실패");
+      alert(`${data.saved}명의 ${getLeaveTypeName(quotaLeaveType)} 부여 일수가 저장되었습니다.`);
+      await fetchQuotas();
+    } catch (e: any) {
+      alert(e.message || "저장 중 오류가 발생했습니다.");
+    } finally {
+      setSavingQuotas(false);
+    }
+  };
+
+  // 시간외근무 부여시간 일괄 등록
+  const handleBulkSaveOvertime = async () => {
+    const items = otRows
+      .filter((u) => (otDrafts[u.id] ?? "").trim() !== "")
+      .map((u) => ({ userId: u.id, monthlyHours: otDrafts[u.id] }));
+
+    if (items.length === 0) {
+      alert("부여할 월 시간을 한 명 이상 입력해 주세요.");
+      return;
+    }
+
+    setSavingOt(true);
+    try {
+      const res = await fetch("/api/admin/overtime-quotas", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ year: otYear, items }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "저장 실패");
+      alert(`${data.saved}명의 월 시간외근무 부여시간이 저장되었습니다.`);
+      await fetchOvertimeQuotas();
+    } catch (e: any) {
+      alert(e.message || "저장 중 오류가 발생했습니다.");
+    } finally {
+      setSavingOt(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab !== "QUOTAS") return;
+    let cancelled = false;
+    fetchQuotas(() => cancelled);
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, selectedYear, quotaLeaveType]);
+
+  useEffect(() => {
+    if (activeTab !== "OVERTIME_QUOTAS") return;
+    let cancelled = false;
+    fetchOvertimeQuotas(() => cancelled);
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, otYear]);
 
   // 승인/반려 처리
-  const handleApprove = async (type: "leaves" | "overtime" | "adjustments", id: string, status: "APPROVED" | "REJECTED") => {
+  const handleApprove = async (type: "leaves" | "overtime" | "adjustments" | "educations" | "trips", id: string, status: "APPROVED" | "REJECTED") => {
     setLoading(id);
     try {
       const res = await fetch(`/api/${type}/${id}`, {
@@ -131,36 +246,6 @@ export default function ApprovalsClient({
   };
 
 
-  // 쿼터 부여 저장
-  const handleSaveQuota = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!quotaUserId || !quotaLeaveType || !quotaTotalDays) {
-      alert("모든 값을 입력해 주세요.");
-      return;
-    }
-
-    try {
-      const res = await fetch("/api/admin/quotas", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          userId: quotaUserId,
-          year: selectedYear,
-          leaveType: quotaLeaveType,
-          totalDays: parseFloat(quotaTotalDays),
-        }),
-      });
-
-      if (res.ok) {
-        alert("휴가 일수가 부여/수정 되었습니다.");
-        fetchQuotas();
-      } else {
-        alert("저장 중 오류가 발생했습니다.");
-      }
-    } catch (e) {
-      alert("오류가 발생했습니다.");
-    }
-  };
 
   // 휴가 종류 생성
   const handleCreateLeaveType = async (e: React.FormEvent) => {
@@ -203,7 +288,7 @@ export default function ApprovalsClient({
   return (
     <div>
       {/* 서브 탭 네비게이션 */}
-      <div style={{ display: "flex", gap: "10px", marginBottom: "20px", borderBottom: "2px solid #e2e8f0", paddingBottom: "8px", overflowX: "auto" }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginBottom: "20px", borderBottom: "2px solid #e2e8f0", paddingBottom: "8px" }}>
         <button
           onClick={() => setActiveTab("APPROVALS")}
           style={{
@@ -218,6 +303,21 @@ export default function ApprovalsClient({
           }}
         >
           신청 결재함
+        </button>
+        <button
+          onClick={() => setActiveTab("RESULTS")}
+          style={{
+            padding: "10px 18px",
+            backgroundColor: activeTab === "RESULTS" ? "#2563eb" : "#f1f5f9",
+            color: activeTab === "RESULTS" ? "#ffffff" : "#475569",
+            border: "none",
+            borderRadius: "6px",
+            fontWeight: "600",
+            cursor: "pointer",
+            whiteSpace: "nowrap"
+          }}
+        >
+          교육/출장 결과 보고
         </button>
         <button
           onClick={() => setActiveTab("USERS")}
@@ -248,6 +348,21 @@ export default function ApprovalsClient({
           }}
         >
           연도별 휴가 부여
+        </button>
+        <button
+          onClick={() => setActiveTab("OVERTIME_QUOTAS")}
+          style={{
+            padding: "10px 18px",
+            backgroundColor: activeTab === "OVERTIME_QUOTAS" ? "#2563eb" : "#f1f5f9",
+            color: activeTab === "OVERTIME_QUOTAS" ? "#ffffff" : "#475569",
+            border: "none",
+            borderRadius: "6px",
+            fontWeight: "600",
+            cursor: "pointer",
+            whiteSpace: "nowrap"
+          }}
+        >
+          시간외근무 부여
         </button>
         <button
           onClick={() => setActiveTab("LEAVE_TYPES")}
@@ -387,6 +502,147 @@ export default function ApprovalsClient({
               </tbody>
             </table>
           </div>
+
+          {/* 교육 결재 */}
+          <div style={{ backgroundColor: "#ffffff", borderRadius: "10px", border: "1px solid #e2e8f0", padding: "20px" }}>
+            <h2 style={{ fontSize: "17px", color: "#0f172a", marginBottom: "15px", fontWeight: "700" }}>교육 신청 결재 대기 건</h2>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ backgroundColor: "#f8fafc", borderBottom: "1px solid #e2e8f0", textAlign: "left" }}>
+                  <th style={{ padding: "10px 14px", color: "#475569", fontSize: "13px" }}>직원명 (부서)</th>
+                  <th style={{ padding: "10px 14px", color: "#475569", fontSize: "13px" }}>교육명 (기관)</th>
+                  <th style={{ padding: "10px 14px", color: "#475569", fontSize: "13px" }}>교육 기간</th>
+                  <th style={{ padding: "10px 14px", color: "#475569", fontSize: "13px" }}>교육비</th>
+                  <th style={{ padding: "10px 14px", color: "#475569", fontSize: "13px" }}>목적</th>
+                  <th style={{ padding: "10px 14px", color: "#475569", fontSize: "13px" }}>관리</th>
+                </tr>
+              </thead>
+              <tbody>
+                {educations.length === 0 ? (
+                  <tr><td colSpan={6} style={{ padding: "20px", textAlign: "center", color: "#94a3b8" }}>대기 중인 교육 신청 결재가 없습니다.</td></tr>
+                ) : (
+                  educations.map((item) => (
+                    <tr key={item.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                      <td style={{ padding: "12px 14px", fontSize: "14px", fontWeight: "500" }}>
+                        {item.user?.name} <span style={{ color: "#64748b", fontSize: "12px" }}>({item.user?.department})</span>
+                      </td>
+                      <td style={{ padding: "12px 14px", fontSize: "14px" }}>
+                        <span style={{ fontWeight: "600", color: "#15803d" }}>{item.title}</span>
+                        <div style={{ fontSize: "12px", color: "#64748b", marginTop: "2px" }}>{item.institution || "기관 미기재"}</div>
+                      </td>
+                      <td style={{ padding: "12px 14px", fontSize: "13px", color: "#475569" }}>
+                        {new Date(item.startDate).toLocaleDateString()} ~ {new Date(item.endDate).toLocaleDateString()}
+                      </td>
+                      <td style={{ padding: "12px 14px", fontSize: "13px", color: "#475569" }}>
+                        {(item.cost || 0).toLocaleString()}원
+                      </td>
+                      <td style={{ padding: "12px 14px", fontSize: "13px", color: "#334155" }}>{item.purpose || "-"}</td>
+                      <td style={{ padding: "12px 14px", whiteSpace: "nowrap" }}>
+                        <button onClick={() => handleApprove("educations", item.id, "APPROVED")} disabled={loading === item.id} style={{ marginRight: "6px", padding: "6px 12px", backgroundColor: "#16a34a", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "13px", fontWeight: "600" }}>승인</button>
+                        <button onClick={() => handleApprove("educations", item.id, "REJECTED")} disabled={loading === item.id} style={{ padding: "6px 12px", backgroundColor: "#dc2626", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "13px", fontWeight: "600" }}>반려</button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* 출장 결재 */}
+          <div style={{ backgroundColor: "#ffffff", borderRadius: "10px", border: "1px solid #e2e8f0", padding: "20px" }}>
+            <h2 style={{ fontSize: "17px", color: "#0f172a", marginBottom: "15px", fontWeight: "700" }}>출장 신청 결재 대기 건</h2>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ backgroundColor: "#f8fafc", borderBottom: "1px solid #e2e8f0", textAlign: "left" }}>
+                  <th style={{ padding: "10px 14px", color: "#475569", fontSize: "13px" }}>직원명 (부서)</th>
+                  <th style={{ padding: "10px 14px", color: "#475569", fontSize: "13px" }}>출장지</th>
+                  <th style={{ padding: "10px 14px", color: "#475569", fontSize: "13px" }}>출장 기간</th>
+                  <th style={{ padding: "10px 14px", color: "#475569", fontSize: "13px" }}>동행자 / 출장비</th>
+                  <th style={{ padding: "10px 14px", color: "#475569", fontSize: "13px" }}>목적</th>
+                  <th style={{ padding: "10px 14px", color: "#475569", fontSize: "13px" }}>관리</th>
+                </tr>
+              </thead>
+              <tbody>
+                {trips.length === 0 ? (
+                  <tr><td colSpan={6} style={{ padding: "20px", textAlign: "center", color: "#94a3b8" }}>대기 중인 출장 신청 결재가 없습니다.</td></tr>
+                ) : (
+                  trips.map((item) => (
+                    <tr key={item.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                      <td style={{ padding: "12px 14px", fontSize: "14px", fontWeight: "500" }}>
+                        {item.user?.name} <span style={{ color: "#64748b", fontSize: "12px" }}>({item.user?.department})</span>
+                      </td>
+                      <td style={{ padding: "12px 14px", fontSize: "14px", fontWeight: "600", color: "#6d28d9" }}>{item.destination}</td>
+                      <td style={{ padding: "12px 14px", fontSize: "13px", color: "#475569" }}>
+                        {new Date(item.startDate).toLocaleDateString()} ~ {new Date(item.endDate).toLocaleDateString()}
+                      </td>
+                      <td style={{ padding: "12px 14px", fontSize: "13px", color: "#475569" }}>
+                        {item.companions || "단독"}
+                        <div style={{ fontSize: "12px", color: "#64748b", marginTop: "2px" }}>{(item.cost || 0).toLocaleString()}원</div>
+                      </td>
+                      <td style={{ padding: "12px 14px", fontSize: "13px", color: "#334155" }}>{item.purpose || "-"}</td>
+                      <td style={{ padding: "12px 14px", whiteSpace: "nowrap" }}>
+                        <button onClick={() => handleApprove("trips", item.id, "APPROVED")} disabled={loading === item.id} style={{ marginRight: "6px", padding: "6px 12px", backgroundColor: "#16a34a", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "13px", fontWeight: "600" }}>승인</button>
+                        <button onClick={() => handleApprove("trips", item.id, "REJECTED")} disabled={loading === item.id} style={{ padding: "6px 12px", backgroundColor: "#dc2626", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "13px", fontWeight: "600" }}>반려</button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* 1-2. 교육/출장 결과 보고 열람 탭 */}
+      {activeTab === "RESULTS" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
+          <div style={{ backgroundColor: "#ffffff", borderRadius: "10px", border: "1px solid #e2e8f0", padding: "20px" }}>
+            <h2 style={{ fontSize: "17px", color: "#0f172a", marginBottom: "4px", fontWeight: "700" }}>제출된 교육 결과 보고</h2>
+            <p style={{ fontSize: "13px", color: "#64748b", marginTop: 0, marginBottom: "16px" }}>최근 50건까지 표시됩니다.</p>
+            {eduResults.length === 0 ? (
+              <div style={{ padding: "20px", textAlign: "center", color: "#94a3b8" }}>제출된 교육 결과 보고가 없습니다.</div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                {eduResults.map((item) => (
+                  <div key={item.id} style={{ border: "1px solid #e2e8f0", borderRadius: "8px", padding: "14px", backgroundColor: "#f8fafc" }}>
+                    <div style={{ fontWeight: "700", fontSize: "14px", color: "#1e293b" }}>
+                      {item.title} <span style={{ fontWeight: "500", color: "#64748b", fontSize: "13px" }}>· {item.user?.name} ({item.user?.department || "-"})</span>
+                    </div>
+                    <div style={{ fontSize: "12px", color: "#64748b", margin: "4px 0 8px 0" }}>
+                      {item.institution || "기관 미기재"} · {new Date(item.startDate).toLocaleDateString()} ~ {new Date(item.endDate).toLocaleDateString()} · 제출일 {new Date(item.resultSubmittedAt).toLocaleString()}
+                    </div>
+                    <div style={{ fontSize: "13px", color: "#334155", whiteSpace: "pre-wrap", backgroundColor: "#ffffff", padding: "10px", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                      {item.resultContent}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div style={{ backgroundColor: "#ffffff", borderRadius: "10px", border: "1px solid #e2e8f0", padding: "20px" }}>
+            <h2 style={{ fontSize: "17px", color: "#0f172a", marginBottom: "4px", fontWeight: "700" }}>제출된 출장 결과 보고</h2>
+            <p style={{ fontSize: "13px", color: "#64748b", marginTop: 0, marginBottom: "16px" }}>최근 50건까지 표시됩니다.</p>
+            {tripResults.length === 0 ? (
+              <div style={{ padding: "20px", textAlign: "center", color: "#94a3b8" }}>제출된 출장 결과 보고가 없습니다.</div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                {tripResults.map((item) => (
+                  <div key={item.id} style={{ border: "1px solid #e2e8f0", borderRadius: "8px", padding: "14px", backgroundColor: "#f8fafc" }}>
+                    <div style={{ fontWeight: "700", fontSize: "14px", color: "#1e293b" }}>
+                      {item.destination} <span style={{ fontWeight: "500", color: "#64748b", fontSize: "13px" }}>· {item.user?.name} ({item.user?.department || "-"})</span>
+                    </div>
+                    <div style={{ fontSize: "12px", color: "#64748b", margin: "4px 0 8px 0" }}>
+                      {new Date(item.startDate).toLocaleDateString()} ~ {new Date(item.endDate).toLocaleDateString()}{item.companions ? ` · 동행: ${item.companions}` : ""} · 제출일 {new Date(item.resultSubmittedAt).toLocaleString()}
+                    </div>
+                    <div style={{ fontSize: "13px", color: "#334155", whiteSpace: "pre-wrap", backgroundColor: "#ffffff", padding: "10px", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                      {item.resultContent}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -469,11 +725,15 @@ export default function ApprovalsClient({
 
       {/* 3. 직원별 연도 휴가 부여 관리 탭 */}
       {activeTab === "QUOTAS" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
-          {/* 부여 설정 입력 폼 */}
+        <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+          {/* 적용 연도 + 휴가 종류만 선택 */}
           <div style={{ backgroundColor: "#ffffff", borderRadius: "10px", border: "1px solid #e2e8f0", padding: "20px" }}>
-            <h2 style={{ fontSize: "17px", color: "#0f172a", marginBottom: "15px", fontWeight: "700" }}>직원별 휴가 일수 부여 및 수정</h2>
-            <form onSubmit={handleSaveQuota} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "15px", alignItems: "end" }}>
+            <h2 style={{ fontSize: "17px", color: "#0f172a", marginBottom: "4px", fontWeight: "700" }}>휴가 일괄 부여</h2>
+            <p style={{ fontSize: "13px", color: "#64748b", marginTop: 0, marginBottom: "16px" }}>
+              적용 연도와 휴가 종류를 선택한 뒤, 아래 표에서 직원별 부여 일수를 입력하고 한 번에 등록하세요.
+              비워 둔 직원은 저장되지 않습니다.
+            </p>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "15px", alignItems: "end" }}>
               <div>
                 <label style={labelStyle}>적용 연도</label>
                 <select value={selectedYear} onChange={(e) => setSelectedYear(parseInt(e.target.value))} style={inputStyle}>
@@ -482,16 +742,6 @@ export default function ApprovalsClient({
                   <option value={2027}>2027년</option>
                 </select>
               </div>
-
-              <div>
-                <label style={labelStyle}>대상 직원</label>
-                <select value={quotaUserId} onChange={(e) => setQuotaUserId(e.target.value)} style={inputStyle}>
-                  {usersList.map((u) => (
-                    <option key={u.id} value={u.id}>{u.name} ({u.department || "미지정"}) - {u.email}</option>
-                  ))}
-                </select>
-              </div>
-
               <div>
                 <label style={labelStyle}>휴가 종류</label>
                 <select value={quotaLeaveType} onChange={(e) => setQuotaLeaveType(e.target.value)} style={inputStyle}>
@@ -500,57 +750,164 @@ export default function ApprovalsClient({
                   ))}
                 </select>
               </div>
-
-              <div>
-                <label style={labelStyle}>총 부여 일수</label>
-                <input type="number" step="0.5" value={quotaTotalDays} onChange={(e) => setQuotaTotalDays(e.target.value)} style={inputStyle} required />
-              </div>
-
-              <button type="submit" style={{ padding: "9px 16px", backgroundColor: "#2563eb", color: "#ffffff", border: "none", borderRadius: "6px", fontWeight: "600", cursor: "pointer" }}>
-                부여 일수 저장
-              </button>
-            </form>
+            </div>
           </div>
 
-          {/* 현황 리스트 테이블 */}
+          {/* 직원 이름 / 부여 일수 한 표에서 일괄 입력 */}
           <div style={{ backgroundColor: "#ffffff", borderRadius: "10px", border: "1px solid #e2e8f0", padding: "20px" }}>
-            <h2 style={{ fontSize: "17px", color: "#0f172a", marginBottom: "15px", fontWeight: "700" }}>{selectedYear}년 직원별 휴가 부여 및 사용 현황</h2>
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
+              <h2 style={{ fontSize: "16px", color: "#0f172a", margin: 0, fontWeight: "700" }}>
+                {selectedYear}년 · {getLeaveTypeName(quotaLeaveType)} 부여 일수 입력
+              </h2>
+              <button
+                type="button"
+                onClick={handleBulkSaveQuotas}
+                disabled={savingQuotas || quotasData.length === 0}
+                style={{ padding: "10px 20px", backgroundColor: savingQuotas ? "#94a3b8" : "#2563eb", color: "#ffffff", border: "none", borderRadius: "6px", fontWeight: "700", cursor: savingQuotas ? "not-allowed" : "pointer", fontSize: "14px" }}
+              >
+                {savingQuotas ? "저장 중..." : "입력한 내용 일괄 등록"}
+              </button>
+            </div>
+
+            <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", minWidth: "520px", borderCollapse: "collapse" }}>
               <thead>
                 <tr style={{ backgroundColor: "#f8fafc", borderBottom: "1px solid #e2e8f0", textAlign: "left" }}>
-                  <th style={{ padding: "10px 14px", color: "#475569", fontSize: "13px" }}>직원명</th>
-                  <th style={{ padding: "10px 14px", color: "#475569", fontSize: "13px" }}>부서</th>
-                  <th style={{ padding: "10px 14px", color: "#475569", fontSize: "13px" }}>휴가 부여 내역 (종류별 부여일수 / 사용일수)</th>
+                  <th style={{ padding: "10px 14px", color: "#475569", fontSize: "13px", whiteSpace: "nowrap" }}>직원 이름</th>
+                  <th style={{ padding: "10px 14px", color: "#475569", fontSize: "13px", width: "180px" }}>부여 일수</th>
+                  <th style={{ padding: "10px 14px", color: "#475569", fontSize: "13px", width: "150px" }}>사용 / 잔여</th>
                 </tr>
               </thead>
               <tbody>
                 {quotasData.length === 0 ? (
-                  <tr><td colSpan={3} style={{ padding: "20px", textAlign: "center", color: "#94a3b8" }}>등록된 직원 휴가 부여 정보가 없습니다.</td></tr>
+                  <tr><td colSpan={3} style={{ padding: "20px", textAlign: "center", color: "#94a3b8" }}>등록된 직원이 없습니다.</td></tr>
                 ) : (
-                  quotasData.map((u) => (
-                    <tr key={u.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
-                      <td style={{ padding: "12px 14px", fontSize: "14px", fontWeight: "600", color: "#1e293b" }}>{u.name}</td>
-                      <td style={{ padding: "12px 14px", fontSize: "13px", color: "#64748b" }}>{u.department || "-"}</td>
-                      <td style={{ padding: "12px 14px" }}>
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
-                          {u.leaveQuotas?.map((q: any) => {
-                            const name = getLeaveTypeName(q.leaveType);
-                            const remain = q.totalDays - q.usedDays;
-                            return (
-                              <div key={q.id} style={{ backgroundColor: "#f1f5f9", padding: "6px 10px", borderRadius: "6px", fontSize: "12px", border: "1px solid #e2e8f0" }}>
-                                <span style={{ fontWeight: "600", color: "#334155" }}>{name}:</span>{" "}
-                                <span style={{ color: "#2563eb", fontWeight: "700" }}>{q.totalDays}일</span> 부여 /{" "}
-                                <span style={{ color: "#dc2626" }}>{q.usedDays}일</span> 사용 (잔여 <span style={{ color: "#16a34a", fontWeight: "700" }}>{remain}일</span>)
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </td>
-                    </tr>
-                  ))
+                  quotasData.map((u) => {
+                    const current = u.leaveQuotas?.find((x: any) => x.leaveType === quotaLeaveType);
+                    const used = current?.usedDays ?? 0;
+                    const draft = parseFloat(quotaDrafts[u.id] ?? "");
+                    const remain = Number.isNaN(draft) ? null : draft - used;
+                    return (
+                      <tr key={u.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                        <td style={{ padding: "10px 14px", fontSize: "14px", fontWeight: "600", color: "#1e293b", whiteSpace: "nowrap" }}>
+                          {u.name}
+                          <span style={{ color: "#64748b", fontSize: "12px", fontWeight: "400" }}> ({u.department || "미지정"})</span>
+                        </td>
+                        <td style={{ padding: "10px 14px" }}>
+                          <input
+                            type="number"
+                            step="0.5"
+                            min="0"
+                            value={quotaDrafts[u.id] ?? ""}
+                            onChange={(e) => setQuotaDrafts({ ...quotaDrafts, [u.id]: e.target.value })}
+                            placeholder="예: 15"
+                            style={{ ...inputStyle, width: "120px" }}
+                          />
+                          <span style={{ marginLeft: "6px", fontSize: "13px", color: "#64748b" }}>일</span>
+                        </td>
+                        <td style={{ padding: "10px 14px", fontSize: "13px", color: "#64748b", whiteSpace: "nowrap" }}>
+                          사용 <span style={{ color: "#dc2626", fontWeight: "700" }}>{used}</span>일
+                          {remain !== null && (
+                            <> · 잔여 <span style={{ color: remain < 0 ? "#dc2626" : "#16a34a", fontWeight: "700" }}>{remain}</span>일</>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 3-2. 시간외근무 부여시간 일괄 등록 */}
+      {activeTab === "OVERTIME_QUOTAS" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+          <div style={{ backgroundColor: "#ffffff", borderRadius: "10px", border: "1px solid #e2e8f0", padding: "20px" }}>
+            <h2 style={{ fontSize: "17px", color: "#0f172a", marginBottom: "4px", fontWeight: "700" }}>시간외근무 일괄 부여</h2>
+            <p style={{ fontSize: "13px", color: "#64748b", marginTop: 0, marginBottom: "16px" }}>
+              적용 연도를 선택한 뒤, 아래 표에서 직원별 <strong>월 부여시간</strong>을 입력하고 한 번에 등록하세요.
+              여기서 입력한 시간은 해당 연도의 <strong>매월</strong> 사용할 수 있는 한도로 적용됩니다.
+              비워 둔 직원은 저장되지 않습니다.
+            </p>
+            <div>
+              <label style={labelStyle}>적용 연도</label>
+              <select value={otYear} onChange={(e) => setOtYear(parseInt(e.target.value))} style={inputStyle}>
+                <option value={2025}>2025년</option>
+                <option value={2026}>2026년</option>
+                <option value={2027}>2027년</option>
+              </select>
+            </div>
+          </div>
+
+          <div style={{ backgroundColor: "#ffffff", borderRadius: "10px", border: "1px solid #e2e8f0", padding: "20px" }}>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
+              <h2 style={{ fontSize: "16px", color: "#0f172a", margin: 0, fontWeight: "700" }}>
+                {otYear}년 시간외근무 월 부여시간 입력
+              </h2>
+              <button
+                type="button"
+                onClick={handleBulkSaveOvertime}
+                disabled={savingOt || otRows.length === 0}
+                style={{ padding: "10px 20px", backgroundColor: savingOt ? "#94a3b8" : "#2563eb", color: "#ffffff", border: "none", borderRadius: "6px", fontWeight: "700", cursor: savingOt ? "not-allowed" : "pointer", fontSize: "14px" }}
+              >
+                {savingOt ? "저장 중..." : "입력한 내용 일괄 등록"}
+              </button>
+            </div>
+
+            {otLoading ? (
+              <div style={{ padding: "20px", textAlign: "center", color: "#64748b" }}>불러오는 중...</div>
+            ) : (
+              <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", minWidth: "520px", borderCollapse: "collapse" }}>
+                <thead>
+                  <tr style={{ backgroundColor: "#f8fafc", borderBottom: "1px solid #e2e8f0", textAlign: "left" }}>
+                    <th style={{ padding: "10px 14px", color: "#475569", fontSize: "13px", whiteSpace: "nowrap" }}>직원 이름</th>
+                    <th style={{ padding: "10px 14px", color: "#475569", fontSize: "13px", width: "180px" }}>월 부여시간</th>
+                    <th style={{ padding: "10px 14px", color: "#475569", fontSize: "13px", width: "200px" }}>이번 달 사용 / 잔여</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {otRows.length === 0 ? (
+                    <tr><td colSpan={3} style={{ padding: "20px", textAlign: "center", color: "#94a3b8" }}>등록된 직원이 없습니다.</td></tr>
+                  ) : (
+                    otRows.map((u) => {
+                      const draft = parseFloat(otDrafts[u.id] ?? "");
+                      const remain = Number.isNaN(draft) ? null : draft - (u.usedThisMonth || 0);
+                      return (
+                        <tr key={u.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                          <td style={{ padding: "10px 14px", fontSize: "14px", fontWeight: "600", color: "#1e293b", whiteSpace: "nowrap" }}>
+                            {u.name}
+                            <span style={{ color: "#64748b", fontSize: "12px", fontWeight: "400" }}> ({u.department || "미지정"})</span>
+                          </td>
+                          <td style={{ padding: "10px 14px" }}>
+                            <input
+                              type="number"
+                              step="0.5"
+                              min="0"
+                              value={otDrafts[u.id] ?? ""}
+                              onChange={(e) => setOtDrafts({ ...otDrafts, [u.id]: e.target.value })}
+                              placeholder="예: 15"
+                              style={{ ...inputStyle, width: "120px" }}
+                            />
+                            <span style={{ marginLeft: "6px", fontSize: "13px", color: "#64748b" }}>시간 / 월</span>
+                          </td>
+                          <td style={{ padding: "10px 14px", fontSize: "13px", color: "#64748b", whiteSpace: "nowrap" }}>
+                            사용 <span style={{ color: "#d97706", fontWeight: "700" }}>{(u.usedThisMonth || 0).toFixed(1)}</span>시간
+                            {remain !== null && (
+                              <> · 잔여 <span style={{ color: remain < 0 ? "#dc2626" : "#16a34a", fontWeight: "700" }}>{remain.toFixed(1)}</span>시간</>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+              </div>
+            )}
           </div>
         </div>
       )}

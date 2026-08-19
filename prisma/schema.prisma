@@ -55,6 +55,9 @@ model User {
   overtimeRequests    OvertimeRequest[]
   scheduleAdjustments ScheduleAdjustment[]
   leaveQuotas         LeaveQuota[]
+  educationRequests   EducationRequest[]
+  businessTrips       BusinessTripRequest[]
+  overtimeQuotas      OvertimeQuota[]
 }
 
 model VerificationToken {
@@ -133,3 +136,62 @@ model ScheduleAdjustment {
 }
 
 // Force prisma generate on Vercel by modifying schema
+
+// 교육신청 / 교육결과
+// 교육결과는 신청이 승인된 뒤 신청자가 result* 필드를 채워 제출합니다 (1신청 : 1결과).
+model EducationRequest {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title       String   // 교육명
+  institution String?  // 교육기관
+  startDate   DateTime
+  endDate     DateTime
+  cost        Float    @default(0.0) // 교육비
+  purpose     String?  // 교육 목적 및 신청 사유
+  status      String   @default("PENDING") // PENDING, APPROVED, REJECTED
+
+  // 교육결과 (교육 종료 후 신청자가 제출)
+  resultContent     String? // 교육 내용 및 결과 보고
+  resultSubmittedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// 출장신청 / 출장결과
+// 출장결과는 신청이 승인된 뒤 신청자가 result* 필드를 채워 제출합니다 (1신청 : 1결과).
+model BusinessTripRequest {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  destination String   // 출장지
+  purpose     String?  // 출장 목적
+  startDate   DateTime
+  endDate     DateTime
+  companions  String?  // 동행자
+  cost        Float    @default(0.0) // 출장비
+  status      String   @default("PENDING") // PENDING, APPROVED, REJECTED
+
+  // 출장결과 (출장 종료 후 신청자가 제출)
+  resultContent     String? // 출장 내용 및 결과 보고
+  resultSubmittedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// 직원별 시간외근무 부여시간 (관리자가 연도 단위로 일괄 부여)
+// monthlyHours 는 "매월" 사용할 수 있는 시간이며, 해당 연도의 각 달에 동일하게 적용됩니다.
+model OvertimeQuota {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  year         Int
+  monthlyHours Float    @default(0.0) // 월 부여시간
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, year])
+}

@@ -1,7 +1,8 @@
+require("dotenv/config");
 const { PrismaClient } = require("@prisma/client");
-const { PrismaBetterSqlite3 } = require("@prisma/adapter-better-sqlite3");
+const { PrismaPg } = require("@prisma/adapter-pg");
 
-const adapter = new PrismaBetterSqlite3({ url: "file:./dev.db" });
+const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
 const prisma = new PrismaClient({ adapter });
 
 async function main() {
@@ -74,7 +75,7 @@ async function main() {
     { userId: regularUser.id, year: currentYear, leaveType: "OFFICIAL", totalDays: 3.0, usedDays: 0.0 },
     { userId: regularUser.id, year: currentYear, leaveType: "FAMILY_CARE", totalDays: 10.0, usedDays: 0.0 },
     { userId: regularUser.id, year: currentYear, leaveType: "COMPENSATORY", totalDays: 2.0, usedDays: 0.0 },
-    
+
     { userId: adminUser.id, year: currentYear, leaveType: "ANNUAL", totalDays: 15.0, usedDays: 3.0 },
     { userId: adminUser.id, year: currentYear, leaveType: "SICK", totalDays: 6.0, usedDays: 0.0 },
     { userId: adminUser.id, year: currentYear, leaveType: "OFFICIAL", totalDays: 5.0, usedDays: 0.0 },
